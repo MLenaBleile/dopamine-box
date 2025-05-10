@@ -24,7 +24,7 @@ const app = initializeApp(firebaseConfig);
 const analytics = getAnalytics(app);
 
 // Initialize Firebase
-const app = initializeApp(firebaseConfig);
+
 const db = getFirestore(app);
 
 export { db, collection, addDoc, getDocs, query, orderBy, onSnapshot };

@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Heart, Plus, Tag, Image, FileText, Youtube, Link, Settings, User, X } from 'lucide-react';
+import { db, collection, addDoc, query, orderBy, onSnapshot } from './firebase';
+
 
 // Sample initial content for the dopamine box
 const initialContent = [
@@ -19,7 +21,8 @@ const initialContent = [
 const availableTags = ['encouragement', 'memory', 'peaceful', 'compliment', 'funny', 'inspirational', 'creative', 'growth', 'perspective'];
 
 export default function DopamineBox() {
-  const [content, setContent] = useState(initialContent);
+  const [content, setContent] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [currentItem, setCurrentItem] = useState(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [selectedTags, setSelectedTags] = useState([]);
@@ -35,6 +38,33 @@ export default function DopamineBox() {
   const [videoThumbnail, setVideoThumbnail] = useState('');
   const [contentTags, setContentTags] = useState([]);
   const [caption, setCaption] = useState('');
+
+// Add this useEffect to load data from Firebase
+useEffect(() => {
+  // Set up real-time listener for content collection
+  const contentRef = collection(db, "dopamineContent");
+  const q = query(contentRef, orderBy("timestamp", "desc"));
+  
+  const unsubscribe = onSnapshot(q, (querySnapshot) => {
+    const items = [];
+    querySnapshot.forEach((doc) => {
+      items.push({
+        id: doc.id,
+        ...doc.data()
+      });
+    });
+    setContent(items);
+    setIsLoading(false);
+  }, (error) => {
+    console.error("Error fetching content: ", error);
+    // If Firebase fails, fall back to initial content
+    setContent(initialContent);
+    setIsLoading(false);
+  });
+  
+  // Clean up listener on unmount
+  return () => unsubscribe();
+}, []);
   
   // Check if this is a shared link view
   useEffect(() => {
@@ -117,58 +147,59 @@ export default function DopamineBox() {
   };
 
   // Save content to the box
-  const saveContent = () => {
-    if (!formInput && selectedContentType !== 'image') return;
-    
-    const newId = content.length > 0 ? Math.max(...content.map(item => item.id)) + 1 : 1;
-    let newItem;
-    
-    switch (selectedContentType) {
-      case 'note':
-        newItem = {
-          id: newId,
-          type: 'note',
-          content: formInput,
-          tags: contentTags
-        };
-        break;
-      case 'image':
-        newItem = {
-          id: newId,
-          type: 'image',
-          content: imagePreview || '/api/placeholder/400/300',
-          caption: caption || 'My image',
-          tags: contentTags
-        };
-        break;
-      case 'video':
-        newItem = {
-          id: newId,
-          type: 'video',
-          content: formInput,
-          thumbnail: videoThumbnail,
-          tags: contentTags
-        };
-        break;
-      case 'link':
-        newItem = {
-          id: newId,
-          type: 'link',
-          content: formInput,
-          title: linkTitle || 'Interesting link',
-          tags: contentTags
-        };
-        break;
-      default:
-        newItem = {
-          id: newId,
-          type: 'note',
-          content: formInput,
-          tags: contentTags
-        };
-    }
-    
-    setContent([...content, newItem]);
+const saveContent = async () => {
+  if (!formInput && selectedContentType !== 'image') return;
+  
+  let newItem;
+  
+  switch (selectedContentType) {
+    case 'note':
+      newItem = {
+        type: 'note',
+        content: formInput,
+        tags: contentTags,
+        timestamp: new Date().getTime()
+      };
+      break;
+    case 'image':
+      newItem = {
+        type: 'image',
+        content: imagePreview || '/api/placeholder/400/300',
+        caption: caption || 'My image',
+        tags: contentTags,
+        timestamp: new Date().getTime()
+      };
+      break;
+    case 'video':
+      newItem = {
+        type: 'video',
+        content: formInput,
+        thumbnail: videoThumbnail,
+        tags: contentTags,
+        timestamp: new Date().getTime()
+      };
+      break;
+    case 'link':
+      newItem = {
+        type: 'link',
+        content: formInput,
+        title: linkTitle || 'Interesting link',
+        tags: contentTags,
+        timestamp: new Date().getTime()
+      };
+      break;
+    default:
+      newItem = {
+        type: 'note',
+        content: formInput,
+        tags: contentTags,
+        timestamp: new Date().getTime()
+      };
+  }
+  
+  try {
+    // Add document to Firestore
+    await addDoc(collection(db, "dopamineContent"), newItem);
     
     // Reset form
     setFormInput('');
@@ -180,8 +211,12 @@ export default function DopamineBox() {
     setShowAddForm(false);
     
     // Show confirmation
-    alert('New item added to your dopamine box!');
-  };
+    alert('New item added to the dopamine box!');
+  } catch (error) {
+    console.error("Error adding document: ", error);
+    alert('Error adding item. Please try again.');
+  }
+};
 
   // Render content based on type
   const renderContent = (item) => {
@@ -482,17 +517,22 @@ export default function DopamineBox() {
         </div>
       </div>
 
-      {/* Main content area */}
-      <div className={`min-h-64 flex items-center justify-center mb-8 transition-all duration-300 ${animation}`}>
-        {currentItem ? (
-          renderContent(currentItem)
-        ) : (
-          <div className="text-center text-gray-500">
-            <p className="mb-2">Press the button below to get a dose of dopamine</p>
-            <Heart className="w-12 h-12 text-pink-200 mx-auto animate-pulse" />
-          </div>
-        )}
-      </div>
+     {/* Main content area */}
+<div className={`min-h-64 flex items-center justify-center mb-8 transition-all duration-300 ${animation}`}>
+  {isLoading ? (
+    <div className="text-center">
+      <div className="w-12 h-12 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+      <p className="text-gray-500">Loading your dopamine...</p>
+    </div>
+  ) : currentItem ? (
+    renderContent(currentItem)
+  ) : (
+    <div className="text-center text-gray-500">
+      <p className="mb-2">Press the button below to get a dose of dopamine</p>
+      <Heart className="w-12 h-12 text-pink-200 mx-auto animate-pulse" />
+    </div>
+  )}
+</div>
 
       {/* Get Dopamine button */}
       <button
